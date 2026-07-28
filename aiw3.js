@@ -7,7 +7,7 @@ const HEADERS = {
   'content-type': 'application/json',
   'lang': 'en',
   'origin': 'https://aiw3.ai',
-  'referer': 'https://aiw3.ai/',
+  'referer': 'https://aiw3.ai/airdrop',
   'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36',
 };
 
@@ -57,7 +57,7 @@ async function login(privateKey) {
 
 async function getDoneTasks(token) {
   console.log('  >> pointsRecord');
-  const res = await fetch('https://api.aiw3.ai/api/reward/pointsRecord?page=1&pageSize=100', {
+  const res = await fetch('https://aiw3.ai/api/airdrop/reward/pointsRecord?page=1&pageSize=100', {
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
   });
   const json = await safeJson(res, 'pointsRecord');
@@ -65,25 +65,71 @@ async function getDoneTasks(token) {
   return new Set(records.map(r => r.type));
 }
 
-async function doTask(token, name, url, body = {}) {
-  console.log(`  >> ${name}`);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { ...HEADERS, authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
-  const json = await safeJson(res, name);
-  if (json.code === 200) {
-    console.log(`  ✓ ${name} sukses`);
-  } else {
-    console.log(`  ✗ ${name}:`, JSON.stringify(json));
+async function doCheckin(token, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      console.log(`  >> Daily Check-in${i > 0 ? ` (retry ${i})` : ''}`);
+      const res = await fetch('https://aiw3.ai/api/airdrop/reward/checkin', {
+        method: 'POST',
+        headers: { ...HEADERS, authorization: `Bearer ${token}`, 'content-length': '0' },
+        body: '',
+      });
+      const json = await safeJson(res, 'checkin');
+      if (json.code === 200) {
+        console.log('  ✓ Daily Check-in sukses');
+        return;
+      }
+      console.log(`  ✗ Daily Check-in:`, JSON.stringify(json));
+    } catch (e) {
+      console.log(`  ✗ Daily Check-in error: ${e.message}`);
+    }
+    if (i < retries - 1) await sleep(3000);
+  }
+}
+
+async function doTwoStepTask(token, taskId, completeBody, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      console.log(`  >> task-action-start [${taskId}]${i > 0 ? ` (retry ${i})` : ''}`);
+      const startRes = await fetch('https://aiw3.ai/api/airdrop/reward/task-action-start', {
+        method: 'POST',
+        headers: { ...HEADERS, authorization: `Bearer ${token}` },
+        body: JSON.stringify({ taskId }),
+      });
+      const startJson = await safeJson(startRes, 'task-action-start');
+      if (startJson.code !== 200) {
+        console.log(`  ✗ task-action-start [${taskId}]:`, JSON.stringify(startJson));
+        if (i < retries - 1) { await sleep(3000); continue; }
+        return;
+      }
+
+      const waitMs = startJson?.data?.verifyAfterMs || 5000;
+      console.log(`  .. tunggu ${waitMs}ms`);
+      await sleep(waitMs);
+
+      console.log(`  >> complete-task [${taskId}]`);
+      const completeRes = await fetch('https://aiw3.ai/api/airdrop/reward/complete-task', {
+        method: 'POST',
+        headers: { ...HEADERS, authorization: `Bearer ${token}` },
+        body: JSON.stringify(completeBody),
+      });
+      const completeJson = await safeJson(completeRes, 'complete-task');
+      if (completeJson.code === 200) {
+        console.log(`  ✓ [${taskId}] sukses`);
+        return;
+      }
+      console.log(`  ✗ complete-task [${taskId}]:`, JSON.stringify(completeJson));
+    } catch (e) {
+      console.log(`  ✗ [${taskId}] error: ${e.message}`);
+    }
+    if (i < retries - 1) await sleep(3000);
   }
 }
 
 const TASKS = [
-  { type: 'daily_checkin',  name: 'Daily Check-in', url: 'https://api.aiw3.ai/api/reward/checkIn' },
-  { type: 'follow_twitter', name: 'Follow Twitter',  url: 'https://api.aiw3.ai/api/reward/followTwitter' },
-  { type: 'retweet',        name: 'Retweet',         url: 'https://api.aiw3.ai/api/reward/retweet' },
+  { type: 'new-join-tg',   taskId: 'new-join-tg',   completeBody: { taskId: 'new-join-tg' } },
+  { type: 'new-follow-x',  taskId: 'new-follow-x',  completeBody: { taskId: 'new-follow-x' } },
+  { type: 'new-retweet-x', taskId: 'new-retweet-x', completeBody: { taskId: 'new-retweet-x', completionScope: 'v2' } },
 ];
 
 async function runAccount(pk, index) {
@@ -95,12 +141,21 @@ async function runAccount(pk, index) {
     const done = await getDoneTasks(token);
     console.log(`[Akun ${index + 1}] Sudah done: ${[...done].join(', ') || 'belum ada'}`);
 
+    // Checkin
+    if (done.has('daily_checkin')) {
+      console.log('  - Daily Check-in: skip');
+    } else {
+      await doCheckin(token);
+      await sleep(2000);
+    }
+
+    // Tasks 2-step
     for (const task of TASKS) {
       if (done.has(task.type)) {
-        console.log(`  - ${task.name}: skip`);
+        console.log(`  - [${task.taskId}]: skip`);
         continue;
       }
-      try { await doTask(token, task.name, task.url); } catch(e) { console.log(`  ✗ ${task.name} error: ${e.message}`); }
+      await doTwoStepTask(token, task.taskId, task.completeBody);
       await sleep(2000);
     }
   } catch (e) {
