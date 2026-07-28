@@ -29,7 +29,7 @@ async function safeJson(res, label) {
 }
 
 async function getNonce(address) {
-  const url = `https://api.aiw3.ai/api/nonce?wallet_address=${address}&invitation_code=&inviteCode=`;
+  const url = `https://api.aiw3.ai/api/nonce?wallet_address=${address}&invitation_code=REFRNFAD&inviteCode=REFRNFAD`;
   const res = await fetch(url, { headers: HEADERS });
   const json = await safeJson(res, 'getNonce');
   if (json.code !== 200) throw new Error('getNonce failed: ' + JSON.stringify(json));
@@ -100,7 +100,7 @@ async function runAccount(pk, index) {
         console.log(`  - ${task.name}: skip`);
         continue;
       }
-      await doTask(token, task.name, task.url);
+      try { await doTask(token, task.name, task.url); } catch(e) { console.log(`  ✗ ${task.name} error: ${e.message}`); }
       await sleep(2000);
     }
   } catch (e) {
