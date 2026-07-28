@@ -1,9 +1,5 @@
 const { ethers } = require('ethers');
 const fs = require('fs');
-const readline = require('readline');
-
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const prompt = (q) => new Promise(r => rl.question(q, ans => r(ans.trim())));
 
 const HEADERS = {
   'accept': 'application/json, text/plain, */*',
@@ -16,6 +12,15 @@ const HEADERS = {
 };
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function promptSync(q) {
+  process.stdout.write(q);
+  const buf = Buffer.alloc(64);
+  const fd = fs.openSync('/dev/tty', 'r');
+  const n = fs.readSync(fd, buf, 0, 64);
+  fs.closeSync(fd);
+  return buf.slice(0, n).toString().trim();
+}
 
 async function safeJson(res) {
   const text = await res.text();
@@ -55,6 +60,7 @@ async function getCheckInInfo(token) {
 }
 
 async function checkIn(token) {
+  // TODO: ganti endpoint ini setelah cek Network tab
   const res = await fetch('https://api.aiw3.ai/api/reward/checkIn', {
     method: 'POST',
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
@@ -90,23 +96,22 @@ async function main() {
   console.log('2. 1 akun (index 0)');
   console.log('3. Range (dari index N)');
 
-  const pilih = await prompt('Pilih (1/2/3): ');
+  const pilih = promptSync('Pilih (1/2/3): ');
 
   let targets = [];
   if (pilih === '1') {
     targets = pks.map((pk, i) => [pk, i]);
   } else if (pilih === '2') {
-    targets = [[pks[0], 0]];
+    const n = parseInt(promptSync('Index akun (mulai 0): '));
+    targets = [[pks[n], n]];
   } else if (pilih === '3') {
-    const n = parseInt(await prompt('Dari index: '));
+    const n = parseInt(promptSync('Dari index: '));
     targets = pks.slice(n).map((pk, i) => [pk, n + i]);
   } else {
-    console.log('Pilihan gak valid');
-    rl.close();
+    console.log('Pilihan gak valid:', pilih);
     return;
   }
 
-  rl.close();
   console.log(`\nJalanin ${targets.length} akun...\n`);
   for (const [pk, i] of targets) {
     await runAccount(pk, i);
