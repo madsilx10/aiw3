@@ -52,60 +52,75 @@ async function login(privateKey) {
   return { token: json.data.accessToken, address };
 }
 
-async function getCheckInInfo(token) {
-  const res = await fetch('https://api.aiw3.ai/api/reward/getCheckInInfo', {
+async function getDoneTasks(token) {
+  const res = await fetch('https://api.aiw3.ai/api/reward/pointsRecord?page=1&pageSize=100', {
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
   });
-  return safeJson(res);
+  const json = await safeJson(res);
+  const records = json?.data?.pointsRecord || [];
+  return new Set(records.map(r => r.type));
 }
 
-async function checkIn(token) {
-  // TODO: ganti endpoint ini setelah cek Network tab
-  const res = await fetch('https://api.aiw3.ai/api/reward/checkIn', {
+async function doTask(token, name, url, body = {}) {
+  const res = await fetch(url, {
     method: 'POST',
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
-    body: JSON.stringify({}),
+    body: JSON.stringify(body),
   });
-  return safeJson(res);
+  const json = await safeJson(res);
+  if (json.code === 200) {
+    console.log(`  ✓ ${name} sukses`);
+  } else {
+    console.log(`  ✗ ${name}:`, JSON.stringify(json));
+  }
 }
+
+// Daftar task — tambah/edit endpoint sesuai hasil Network tab
+const TASKS = [
+  { type: 'daily_checkin',  name: 'Daily Check-in',    url: 'https://api.aiw3.ai/api/reward/checkIn' },
+  { type: 'follow_twitter', name: 'Follow Twitter',     url: 'https://api.aiw3.ai/api/reward/followTwitter' },
+  { type: 'retweet',        name: 'Retweet',            url: 'https://api.aiw3.ai/api/reward/retweet' },
+];
 
 async function runAccount(pk, index) {
   try {
-    console.log(`\n[${index + 1}] Login...`);
+    console.log(`\n[Akun ${index + 1}] Login...`);
     const { token, address } = await login(pk);
-    console.log(`[${index + 1}] ${address} - OK`);
+    console.log(`[Akun ${index + 1}] ${address} - OK`);
 
-    const info = await getCheckInInfo(token);
-    console.log(`[${index + 1}] Info:`, JSON.stringify(info?.data || info));
+    const done = await getDoneTasks(token);
+    console.log(`[Akun ${index + 1}] Task selesai: ${[...done].join(', ') || 'belum ada'}`);
 
-    const result = await checkIn(token);
-    if (result.code === 200) {
-      console.log(`[${index + 1}] ✓ CheckIn sukses`);
-    } else {
-      console.log(`[${index + 1}] CheckIn:`, JSON.stringify(result));
+    for (const task of TASKS) {
+      if (done.has(task.type)) {
+        console.log(`  - ${task.name}: skip (udah done)`);
+        continue;
+      }
+      await doTask(token, task.name, task.url);
+      await sleep(2000);
     }
   } catch (e) {
-    console.error(`[${index + 1}] Error:`, e.message);
+    console.error(`[Akun ${index + 1}] Error:`, e.message);
   }
 }
 
 async function main() {
   const pks = fs.readFileSync('wallet.txt', 'utf8').trim().split('\n').map(l => l.trim()).filter(Boolean);
   console.log(`Total akun: ${pks.length}`);
-  console.log('1. Semua akun');
-  console.log('2. 1 akun (index 0)');
-  console.log('3. Range (dari index N)');
+  console.log('1. 1 akun');
+  console.log('2. Semua akun');
+  console.log('3. Range (dari akun N)');
 
   const pilih = promptSync('Pilih (1/2/3): ');
 
   let targets = [];
   if (pilih === '1') {
-    targets = pks.map((pk, i) => [pk, i]);
-  } else if (pilih === '2') {
-    const n = parseInt(promptSync('Index akun (mulai 0): '));
+    const n = parseInt(promptSync(`Akun ke berapa? (1-${pks.length}): `)) - 1;
     targets = [[pks[n], n]];
+  } else if (pilih === '2') {
+    targets = pks.map((pk, i) => [pk, i]);
   } else if (pilih === '3') {
-    const n = parseInt(promptSync('Dari index: '));
+    const n = parseInt(promptSync(`Mulai dari akun ke berapa? (1-${pks.length}): `)) - 1;
     targets = pks.slice(n).map((pk, i) => [pk, n + i]);
   } else {
     console.log('Pilihan gak valid:', pilih);
