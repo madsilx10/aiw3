@@ -1,5 +1,6 @@
 const { ethers } = require('ethers');
 const fs = require('fs');
+const readline = require('readline');
 
 const HEADERS = {
   'accept': 'application/json, text/plain, */*',
@@ -14,10 +15,21 @@ const HEADERS = {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+async function prompt(q) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise(r => rl.question(q, ans => { rl.close(); r(ans.trim()); }));
+}
+
+async function safeJson(res) {
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch { throw new Error('Response bukan JSON: ' + text.slice(0, 100)); }
+}
+
 async function getNonce(address) {
   const url = `https://api.aiw3.ai/api/nonce?wallet_address=${address}&invitation_code=&inviteCode=`;
   const res = await fetch(url, { headers: HEADERS });
-  const json = await res.json();
+  const json = await safeJson(res);
   if (json.code !== 200) throw new Error('getNonce failed: ' + JSON.stringify(json));
   return json.data.nonce;
 }
@@ -25,22 +37,15 @@ async function getNonce(address) {
 async function login(privateKey) {
   const wallet = new ethers.Wallet(privateKey);
   const address = wallet.address;
-
   const nonce = await getNonce(address);
   const message = `Welcome to AIW3.\n\nPlease sign this message to login AIW3.\n\nTimestamp: ${nonce}`;
   const signature = await wallet.signMessage(message);
-
   const res = await fetch('https://api.aiw3.ai/api/solanachainauth/verify', {
     method: 'POST',
     headers: HEADERS,
-    body: JSON.stringify({
-      network: 'BSC',
-      publicKey: address,
-      signature,
-      type: 'MetaMask',
-    }),
+    body: JSON.stringify({ network: 'BSC', publicKey: address, signature, type: 'MetaMask' }),
   });
-  const json = await res.json();
+  const json = await safeJson(res);
   if (json.code !== 200) throw new Error('login failed: ' + JSON.stringify(json));
   return { token: json.data.accessToken, address };
 }
@@ -49,8 +54,7 @@ async function getCheckInInfo(token) {
   const res = await fetch('https://api.aiw3.ai/api/reward/getCheckInInfo', {
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
   });
-  const json = await res.json();
-  return json;
+  return safeJson(res);
 }
 
 async function checkIn(token) {
@@ -59,8 +63,7 @@ async function checkIn(token) {
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
     body: JSON.stringify({}),
   });
-  const json = await res.json();
-  return json;
+  return safeJson(res);
 }
 
 async function runAccount(pk, index) {
@@ -83,13 +86,6 @@ async function runAccount(pk, index) {
   }
 }
 
-async function prompt(q) {
-  process.stdout.write(q);
-  return new Promise(r => {
-    process.stdin.once('data', d => r(d.toString().trim()));
-  });
-}
-
 async function main() {
   const pks = fs.readFileSync('wallet.txt', 'utf8').trim().split('\n').map(l => l.trim()).filter(Boolean);
   console.log(`Total akun: ${pks.length}`);
@@ -109,7 +105,6 @@ async function main() {
     targets = pks.map((pk, i) => [pk, i]);
   }
 
-  process.stdin.destroy();
   console.log(`\nJalanin ${targets.length} akun...\n`);
   for (const [pk, i] of targets) {
     await runAccount(pk, i);
