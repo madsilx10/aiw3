@@ -22,16 +22,16 @@ function promptSync(q) {
   return buf.slice(0, n).toString().trim();
 }
 
-async function safeJson(res) {
+async function safeJson(res, label) {
   const text = await res.text();
   try { return JSON.parse(text); }
-  catch { throw new Error('Bukan JSON: ' + text.slice(0, 150)); }
+  catch { throw new Error(`${label} ${res.status}: ` + text.slice(0, 150)); }
 }
 
 async function getNonce(address) {
   const url = `https://api.aiw3.ai/api/nonce?wallet_address=${address}&invitation_code=&inviteCode=`;
   const res = await fetch(url, { headers: HEADERS });
-  const json = await safeJson(res);
+  const json = await safeJson(res, 'getNonce');
   if (json.code !== 200) throw new Error('getNonce failed: ' + JSON.stringify(json));
   return json.data.nonce;
 }
@@ -39,35 +39,40 @@ async function getNonce(address) {
 async function login(privateKey) {
   const wallet = new ethers.Wallet(privateKey);
   const address = wallet.address;
+  console.log('  >> getNonce');
   const nonce = await getNonce(address);
+  console.log('  >> sign');
   const message = `Welcome to AIW3.\n\nPlease sign this message to login AIW3.\n\nTimestamp: ${nonce}`;
   const signature = await wallet.signMessage(message);
+  console.log('  >> verify');
   const res = await fetch('https://api.aiw3.ai/api/solanachainauth/verify', {
     method: 'POST',
     headers: HEADERS,
     body: JSON.stringify({ network: 'BSC', publicKey: address, signature, type: 'MetaMask' }),
   });
-  const json = await safeJson(res);
+  const json = await safeJson(res, 'verify');
   if (json.code !== 200) throw new Error('login failed: ' + JSON.stringify(json));
   return { token: json.data.accessToken, address };
 }
 
 async function getDoneTasks(token) {
+  console.log('  >> pointsRecord');
   const res = await fetch('https://api.aiw3.ai/api/reward/pointsRecord?page=1&pageSize=100', {
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
   });
-  const json = await safeJson(res);
+  const json = await safeJson(res, 'pointsRecord');
   const records = json?.data?.pointsRecord || [];
   return new Set(records.map(r => r.type));
 }
 
 async function doTask(token, name, url, body = {}) {
+  console.log(`  >> ${name}`);
   const res = await fetch(url, {
     method: 'POST',
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
-  const json = await safeJson(res);
+  const json = await safeJson(res, name);
   if (json.code === 200) {
     console.log(`  ✓ ${name} sukses`);
   } else {
@@ -75,11 +80,10 @@ async function doTask(token, name, url, body = {}) {
   }
 }
 
-// Daftar task — tambah/edit endpoint sesuai hasil Network tab
 const TASKS = [
-  { type: 'daily_checkin',  name: 'Daily Check-in',    url: 'https://api.aiw3.ai/api/reward/checkIn' },
-  { type: 'follow_twitter', name: 'Follow Twitter',     url: 'https://api.aiw3.ai/api/reward/followTwitter' },
-  { type: 'retweet',        name: 'Retweet',            url: 'https://api.aiw3.ai/api/reward/retweet' },
+  { type: 'daily_checkin',  name: 'Daily Check-in', url: 'https://api.aiw3.ai/api/reward/checkIn' },
+  { type: 'follow_twitter', name: 'Follow Twitter',  url: 'https://api.aiw3.ai/api/reward/followTwitter' },
+  { type: 'retweet',        name: 'Retweet',         url: 'https://api.aiw3.ai/api/reward/retweet' },
 ];
 
 async function runAccount(pk, index) {
@@ -89,11 +93,11 @@ async function runAccount(pk, index) {
     console.log(`[Akun ${index + 1}] ${address} - OK`);
 
     const done = await getDoneTasks(token);
-    console.log(`[Akun ${index + 1}] Task selesai: ${[...done].join(', ') || 'belum ada'}`);
+    console.log(`[Akun ${index + 1}] Sudah done: ${[...done].join(', ') || 'belum ada'}`);
 
     for (const task of TASKS) {
       if (done.has(task.type)) {
-        console.log(`  - ${task.name}: skip (udah done)`);
+        console.log(`  - ${task.name}: skip`);
         continue;
       }
       await doTask(token, task.name, task.url);
