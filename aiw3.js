@@ -2,11 +2,13 @@ const { ethers } = require('ethers');
 const fs = require('fs');
 const readline = require('readline');
 
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const prompt = (q) => new Promise(r => rl.question(q, ans => r(ans.trim())));
+
 const HEADERS = {
   'accept': 'application/json, text/plain, */*',
   'accept-language': 'en-US,en;q=0.9',
   'content-type': 'application/json',
-  'host': 'api.aiw3.ai',
   'lang': 'en',
   'origin': 'https://aiw3.ai',
   'referer': 'https://aiw3.ai/',
@@ -15,15 +17,10 @@ const HEADERS = {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function prompt(q) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(r => rl.question(q, ans => { rl.close(); r(ans.trim()); }));
-}
-
 async function safeJson(res) {
   const text = await res.text();
   try { return JSON.parse(text); }
-  catch { throw new Error('Response bukan JSON: ' + text.slice(0, 100)); }
+  catch { throw new Error('Bukan JSON: ' + text.slice(0, 150)); }
 }
 
 async function getNonce(address) {
@@ -70,16 +67,16 @@ async function runAccount(pk, index) {
   try {
     console.log(`\n[${index + 1}] Login...`);
     const { token, address } = await login(pk);
-    console.log(`[${index + 1}] ${address} - token OK`);
+    console.log(`[${index + 1}] ${address} - OK`);
 
     const info = await getCheckInInfo(token);
-    console.log(`[${index + 1}] CheckIn info:`, JSON.stringify(info?.data || info));
+    console.log(`[${index + 1}] Info:`, JSON.stringify(info?.data || info));
 
     const result = await checkIn(token);
     if (result.code === 200) {
       console.log(`[${index + 1}] ✓ CheckIn sukses`);
     } else {
-      console.log(`[${index + 1}] CheckIn response:`, JSON.stringify(result));
+      console.log(`[${index + 1}] CheckIn:`, JSON.stringify(result));
     }
   } catch (e) {
     console.error(`[${index + 1}] Error:`, e.message);
@@ -90,21 +87,26 @@ async function main() {
   const pks = fs.readFileSync('wallet.txt', 'utf8').trim().split('\n').map(l => l.trim()).filter(Boolean);
   console.log(`Total akun: ${pks.length}`);
   console.log('1. Semua akun');
-  console.log('2. Satu akun (index 0)');
-  console.log('3. Mulai dari index N');
+  console.log('2. 1 akun (index 0)');
+  console.log('3. Range (dari index N)');
 
   const pilih = await prompt('Pilih (1/2/3): ');
 
   let targets = [];
-  if (pilih === '2') {
+  if (pilih === '1') {
+    targets = pks.map((pk, i) => [pk, i]);
+  } else if (pilih === '2') {
     targets = [[pks[0], 0]];
   } else if (pilih === '3') {
-    const n = parseInt(await prompt('Mulai dari index: '));
+    const n = parseInt(await prompt('Dari index: '));
     targets = pks.slice(n).map((pk, i) => [pk, n + i]);
   } else {
-    targets = pks.map((pk, i) => [pk, i]);
+    console.log('Pilihan gak valid');
+    rl.close();
+    return;
   }
 
+  rl.close();
   console.log(`\nJalanin ${targets.length} akun...\n`);
   for (const [pk, i] of targets) {
     await runAccount(pk, i);
