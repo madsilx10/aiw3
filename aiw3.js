@@ -57,7 +57,7 @@ async function login(privateKey) {
 
 async function getDoneTasks(token) {
   console.log('  >> pointsRecord');
-  const res = await fetch('https://aiw3.ai/api/airdrop/reward/pointsRecord?page=1&pageSize=100', {
+  const res = await fetch('https://api.aiw3.ai/api/reward/pointsRecord?page=1&pageSize=100', {
     headers: { ...HEADERS, authorization: `Bearer ${token}` },
   });
   const json = await safeJson(res, 'pointsRecord');
